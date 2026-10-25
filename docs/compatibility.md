@@ -15,6 +15,8 @@ Python の API 名、例外クラス名、task-local 実装、migration 管理�
 - diagnostic reader → `Advanced.LookupPublicationDiagnostic`
 - maintenance service → `Maintenance.RunCleanupCycle`
 
+ライブラリ自身の version は `Version()` で取得します。開発 checkout は `dev`、公開 module は取得した version タグを返します。
+
 prepared / committed handle の情報は `Info()` で取得します。
 返された handle の値コピー、JSON からの再構成、別 publisher への prepared handle の転用は拒否します。
 通常 API の情報には object path / object ref を含めません。

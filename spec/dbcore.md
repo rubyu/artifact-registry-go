@@ -22,6 +22,8 @@ identifier は lowercase ASCII の先頭文字または `_` で始まり、以�
 session_user は接続主体のまま保持します。role の作成・membership・database privilege は bootstrap が所有します。
 CLI は bootstrap 済み owner 所有 schema を使い、schema を自動作成しません。
 programmatic target の role 未指定経路と schema 作成指定は、明示した場合だけ使用します。
+reserved schema 名、schema owner の不一致、管理 marker のない非空 schema を migration 開始前に拒否します。
+CLI は `status` / `steps` / 失敗時の `message` を出力し、開始した action と最終 revision の診断情報を維持します。
 
 runtime / maintenance は lifecycle table の列単位 SELECT と、担当 lifecycle 関数の EXECUTE のみを持ちます。
 direct DML、table 全体 SELECT、identity sequence、enum USAGE は付与しません。
