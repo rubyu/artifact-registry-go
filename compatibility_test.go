@@ -144,8 +144,16 @@ func sameJSON(t *testing.T, got, want any) {
 	if err = json.Unmarshal(actual, &normalized); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(normalized, want) {
-		t.Fatalf("Python comparison mismatch\nGo: %s\nPython: %v", actual, want)
+	expected, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var normalizedExpected any
+	if err = json.Unmarshal(expected, &normalizedExpected); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(normalized, normalizedExpected) {
+		t.Fatalf("Python comparison mismatch\nGo: %s\nPython: %s", actual, expected)
 	}
 }
 func TestIntegrationPythonFlowCompatibility(t *testing.T) {

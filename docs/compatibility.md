@@ -34,6 +34,7 @@ Go 側の migration revision 1 / 2 は移植元の revision 1 / 2 に対応し�
 
 Go では `txscope.Scope.Context()` を下位処理へ明示的に渡します。
 `context.Background()` への置き換えで scope を隠す呼び出しは契約外です。
+advanced exception は `txscope.ExternalIOInTx` の理由付き callback に限定し、callback の終了後は許可用 context を失効させます。
 開始済みの storage I/O と補償は、親の cancellation 後も期限付き context で完了させます。
 commit 結果不明の場合は hook を実行せず、durable state と maintenance に委ねます。
 
@@ -47,3 +48,5 @@ provider は TLS を必須とし、固定 credential と併用できません。
 rollback、batch 原子性、upload 失敗、cancellation、stale cleanup、delete retry、lock、権限拒否を検証します。
 `txscope/scope_test.go` は commit / rollback 結果不明、probe、hook の順序と元エラーの維持を検証します。
 Python との比較で固定した結果は `testdata/compatibility/` と Go テストで再検証します。
+catalog 比較は、enum 10 行、列 20 行、制約 25 行、index 10 行、trigger 2 行、function 10 行、
+table privilege 10 行、column SELECT 80 行、function privilege 50 行を検査します。
