@@ -125,7 +125,7 @@ func lockError(ctx context.Context, err error) error {
 }
 
 func EnsureExpected(ctx context.Context, db *sql.DB, schema string, expected int64) error {
-	if err := ValidateIdentifier(schema); err != nil {
+	if err := ValidateSchemaName(schema); err != nil {
 		return err
 	}
 	var version int64

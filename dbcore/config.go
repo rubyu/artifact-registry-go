@@ -30,6 +30,16 @@ func ValidateIdentifier(value string) error {
 	return nil
 }
 
+func ValidateSchemaName(value string) error {
+	if err := ValidateIdentifier(value); err != nil {
+		return err
+	}
+	if value == "information_schema" || strings.HasPrefix(value, "pg_") {
+		return fmt.Errorf("reserved schema name: %s", value)
+	}
+	return nil
+}
+
 func QuoteIdentifier(value string) string { return `"` + strings.ReplaceAll(value, `"`, `""`) + `"` }
 
 type Config struct {

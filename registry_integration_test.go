@@ -525,3 +525,107 @@ func TestIntegrationDomainTransaction(t *testing.T) {
 		t.Fatal("publication not compensated")
 	}
 }
+
+func TestIntegrationMigrationPreflightAndResults(t *testing.T) {
+	h := integrationHarness(t)
+	ctx := context.Background()
+	connection := h.config.DB
+	connection.User = h.roles.Migrator
+	connection.Password = envOr("ARTIFACT_REGISTRY_TEST_MIGRATOR_PASSWORD", "test-only")
+	target, err := schema.BuildTarget(connection, h.config.Schema, &h.roles, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step, err := dbcore.Migrate(ctx, target)
+	if err != nil || step.Status != "ok" || step.CurrentRevision == nil || *step.CurrentRevision != "000000000002" || step.Action == nil || *step.Action != "upgrade" {
+		t.Fatal(step, err)
+	}
+	for _, legacy := range []bool{false, true} {
+		name := h.config.Schema + "_unmanaged"
+		if legacy {
+			name = h.config.Schema + "_legacy"
+		}
+		if _, err = h.admin.Exec("CREATE SCHEMA " + name + " AUTHORIZATION " + h.roles.Owner + "; GRANT USAGE ON SCHEMA " + name + " TO " + h.roles.Migrator); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { h.admin.Exec("DROP SCHEMA " + name + " CASCADE") })
+		owner, err := connection.Open(ctx, h.roles.Owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		table := "unmanaged"
+		if legacy {
+			table = "alembic_version"
+		}
+		_, err = owner.Exec("CREATE TABLE " + name + "." + table + "(value text)")
+		owner.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		target, err = schema.BuildTarget(connection, name, &h.roles, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		step, err = dbcore.Migrate(ctx, target)
+		if err == nil || step.Status != "error" || step.Message == nil || step.Action != nil {
+			t.Fatal(step, err)
+		}
+		var marker bool
+		if err = h.admin.QueryRow("SELECT to_regclass($1) IS NOT NULL", name+".schema_migrations").Scan(&marker); err != nil || marker {
+			t.Fatal("unmanaged schema was adopted", marker, err)
+		}
+	}
+}
+
+func TestIntegrationExternalIOAndAttachedMaintenance(t *testing.T) {
+	h := integrationHarness(t)
+	ctx := context.Background()
+	var before int
+	if err := h.admin.QueryRow("SELECT count(*) FROM " + h.r.table("artifact_registry_publications")).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.r.RunTx(ctx, func(tx *txscope.Scope) error {
+		if _, err := h.r.PrepareBytes(tx.Context(), []byte("forbidden")); !errors.Is(err, txscope.ErrExternalIO) {
+			t.Fatal(err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var after int
+	if err := h.admin.QueryRow("SELECT count(*) FROM " + h.r.table("artifact_registry_publications")).Scan(&after); err != nil || before != after {
+		t.Fatal("I/O rejection left intent", before, after, err)
+	}
+	var prepared *PreparedArtifact
+	if err := h.r.RunTx(ctx, func(tx *txscope.Scope) error {
+		return txscope.ExternalIOInTx(tx.Context(), "advanced publish with durable reconciliation", func(authorized context.Context) error {
+			var err error
+			prepared, err = h.r.PrepareBytes(authorized, []byte("advanced"))
+			if err != nil {
+				return err
+			}
+			_, err = h.r.CommitPrepared(authorized, tx, prepared)
+			return err
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if d := h.diagnostic(t, prepared.Ref()); d.PublicationStatus != Committed {
+		t.Fatal(d)
+	}
+	config := MaintenanceConfig{Runtime: h.config, Cleanup: h.m.settings}
+	config.Runtime.DB = dbcore.Config{Host: "unreachable"}
+	attached, err := AttachMaintenance(h.m.registry.db, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = attached.RunCleanupCycle(ctx); err != nil {
+		t.Fatal("attached pool was not used", err)
+	}
+	if err = attached.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = h.m.registry.db.PingContext(ctx); err != nil {
+		t.Fatal("caller-owned pool was closed", err)
+	}
+}

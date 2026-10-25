@@ -12,3 +12,12 @@ func TestNextMinorVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestExistingReleaseVersion(t *testing.T) {
+	if got, ok := existingVersion([]string{"v0.99.0", "v1.2.0", "v1.10.0", "v2.0.0-rc.1"}); !ok || got != "v1.10.0" {
+		t.Fatal(got, ok)
+	}
+	if _, ok := existingVersion([]string{"invalid"}); ok {
+		t.Fatal("invalid version accepted")
+	}
+}

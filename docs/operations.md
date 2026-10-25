@@ -24,6 +24,9 @@ migration CLI は次の値をすべて要求します。
 migration の接続 user 名と migrator 権限 role 名が異なる動的 LOGIN も使用できます。
 その場合も owner への SET 経路を PostgreSQL 側で要求します。
 他 workload の credential への fallback は行いません。
+migration CLI の stdout は `status` と `steps` を持ち、失敗時は `message` を追加します。
+各 step は target / schema、適用前後の revision、開始した action、失敗理由を保持します。
+診断上の revision は移植元との対応を明確にするため 12 桁表記にします。
 
 ## maintenance
 

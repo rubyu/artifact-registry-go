@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -118,7 +119,7 @@ func AssertExternalIOAllowed(ctx context.Context) error {
 
 // ExternalIOInTx は理由を持つ閉じた副作用処理にだけ、有効期間付きの許可を渡す。
 func ExternalIOInTx(ctx context.Context, reason string, fn func(context.Context) error) error {
-	if reason == "" || fn == nil {
+	if strings.TrimSpace(reason) == "" || fn == nil {
 		return errors.New("external I/O requires a reason and callback")
 	}
 	s, _ := ctx.Value(contextKey{}).(*Scope)

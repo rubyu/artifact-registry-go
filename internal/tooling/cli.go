@@ -31,24 +31,27 @@ func Run(ctx context.Context, workload string, args []string, out io.Writer) int
 	var err error
 	exit := 0
 	if workload == "migrate" {
-		var name string
-		var connection dbcore.Config
-		var roles schema.Roles
-		var target dbcore.MigrationTarget
-		name, err = SchemaName()
-		if err == nil {
-			connection, err = LoadDB("migration")
-		}
-		if err == nil {
-			roles, err = LoadRoles()
-		}
-		if err == nil {
-			target, err = schema.BuildTarget(connection, name, &roles, false)
-		}
-		if err == nil {
-			err = dbcore.EnsureLatest(ctx, target)
-		}
-		result = map[string]any{"status": "ok", "component": "artifact-registry", "schema_name": name, "version": schema.Version}
+		return dbcore.RunMigrationCLI(out, func() ([]dbcore.MigrationStepResult, error) {
+			var name string
+			var connection dbcore.Config
+			var roles schema.Roles
+			var target dbcore.MigrationTarget
+			name, err = SchemaName()
+			if err == nil {
+				connection, err = LoadDB("migration")
+			}
+			if err == nil {
+				roles, err = LoadRoles()
+			}
+			if err == nil {
+				target, err = schema.BuildTarget(connection, name, &roles, false)
+			}
+			if err == nil {
+				step, migrationErr := dbcore.Migrate(ctx, target)
+				return []dbcore.MigrationStepResult{step}, migrationErr
+			}
+			return nil, err
+		})
 	} else {
 		var config registry.MaintenanceConfig
 		var maintenance *registry.Maintenance

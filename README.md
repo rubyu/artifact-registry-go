@@ -65,7 +65,7 @@ Alembic 管理 DB の自動採用は行いません。[互換性と移行範囲]
 
 ## リリース
 
-`main` の更新で直近の安定タグから minor を一つ増やし、patch を `0` に戻します。
+`main` の更新で最大の安定 version タグから minor を一つ増やし、patch を `0` に戻します。
 最初のタグは `v0.1.0` です。ソースに version 更新 commit を追加せず、対象 commit にタグを付けます。
 Linux / macOS / Windows 向け CLI と SHA-256 checksum、`version.json` を GitHub Release に公開します。
 各 CLI の `--version` には version、完全な commit hash、対象 commit の日時を埋め込みます。

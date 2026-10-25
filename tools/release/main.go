@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -58,7 +57,20 @@ type plan struct {
 	Version  string `json:"version"`
 	Commit   string `json:"commit"`
 	Date     string `json:"date"`
-	Existing bool   `json:"existing"`
+	Existing bool   `json:"-"`
+}
+
+func existingVersion(tags []string) (string, bool) {
+	var latest version
+	found := ""
+	for _, tag := range tags {
+		value, ok := parse(tag)
+		if ok && (found == "" || latest.less(value)) {
+			latest = value
+			found = tag
+		}
+	}
+	return found, found != ""
 }
 
 func releasePlan() (plan, error) {
@@ -74,12 +86,8 @@ func releasePlan() (plan, error) {
 	if err != nil {
 		return plan{}, err
 	}
-	tags := strings.Fields(atHead)
-	sort.Strings(tags)
-	for _, tag := range tags {
-		if _, ok := parse(tag); ok {
-			return plan{tag, commit, date, true}, nil
-		}
+	if tag, ok := existingVersion(strings.Fields(atHead)); ok {
+		return plan{tag, commit, date, true}, nil
 	}
 	all, err := git("tag", "--list", "v*")
 	if err != nil {

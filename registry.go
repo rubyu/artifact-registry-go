@@ -53,7 +53,7 @@ func Attach(db *sql.DB, config Config, opts ...Option) (*Registry, error) {
 	if name == "" {
 		name = "artifact_registry"
 	}
-	if err := dbcore.ValidateIdentifier(name); err != nil {
+	if err := dbcore.ValidateSchemaName(name); err != nil {
 		return nil, err
 	}
 	c := config.ObjectStore

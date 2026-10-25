@@ -33,7 +33,7 @@ func (r Roles) Validate() error {
 }
 
 func BuildTarget(connection dbcore.Config, name string, roles *Roles, createSchema bool) (dbcore.MigrationTarget, error) {
-	if err := dbcore.ValidateIdentifier(name); err != nil {
+	if err := dbcore.ValidateSchemaName(name); err != nil {
 		return dbcore.MigrationTarget{}, err
 	}
 	role := ""
@@ -66,7 +66,7 @@ func BuildTarget(connection dbcore.Config, name string, roles *Roles, createSche
 	down := &goose.GoFunc{RunTx: func(context.Context, *sql.Tx) error {
 		return errors.New("migration is forward-only; restore a snapshot or apply a corrective forward migration")
 	}}
-	return dbcore.MigrationTarget{Connection: connection, Schema: name, LockKey: "artifact-registry/" + name, MigrationRole: role, CreateSchema: createSchema, ExpectedVersion: Version, Migrations: []*goose.Migration{
+	return dbcore.MigrationTarget{Name: "artifact-registry", Connection: connection, Schema: name, LockKey: "artifact-registry/" + name, MigrationRole: role, CreateSchema: createSchema, ExpectedVersion: Version, Migrations: []*goose.Migration{
 		goose.NewGoMigration(1, up("00001_tables.sql"), down), goose.NewGoMigration(2, up("00002_lifecycle.sql", "ownership.sql", "privileges.sql"), down),
 	}}, nil
 }

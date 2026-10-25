@@ -30,7 +30,7 @@ func valueOr(name, def string) string {
 }
 func SchemaName() (string, error) {
 	value := strings.TrimSpace(valueOr("ARTIFACT_REGISTRY_SCHEMA", "artifact_registry"))
-	return value, dbcore.ValidateIdentifier(value)
+	return value, dbcore.ValidateSchemaName(value)
 }
 func LoadDB(workload string) (dbcore.Config, error) {
 	prefix := "ARTIFACT_REGISTRY_"
