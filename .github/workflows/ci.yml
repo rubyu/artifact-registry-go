@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ARTIFACT_REGISTRY_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/artifact_registry?sslmode=disable
+      ARTIFACT_REGISTRY_TEST_S3_ENDPOINT: 127.0.0.1:9000
+      ARTIFACT_REGISTRY_TEST_MIGRATOR_PASSWORD: artifact-registry-migrator-test-only
+      ARTIFACT_REGISTRY_TEST_RUNTIME_PASSWORD: artifact-registry-runtime-test-only
+      ARTIFACT_REGISTRY_TEST_MAINTENANCE_PASSWORD: artifact-registry-maintenance-test-only
+      ARTIFACT_REGISTRY_TEST_READINESS_PASSWORD: artifact-registry-readiness-test-only
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: 書式と依存の確認
+        run: |
+          test -z "$(gofmt -l .)"
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          go vet ./...
+      - name: PostgreSQL と object storage の起動
+        run: docker compose -f docker/compose.yaml up -d --wait
+      - name: 単体・統合・互換性テスト
+        run: go test -race -count=1 -timeout=10m -coverprofile=coverage.out ./...
+      - name: CLI のビルド
+        run: go build ./cmd/...
+      - name: サービスログ
+        if: failure()
+        run: docker compose -f docker/compose.yaml logs
+      - name: 検証環境の終了
+        if: always()
+        run: docker compose -f docker/compose.yaml down -v

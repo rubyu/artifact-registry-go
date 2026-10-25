@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ARTIFACT_REGISTRY_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/artifact_registry?sslmode=disable
+      ARTIFACT_REGISTRY_TEST_S3_ENDPOINT: 127.0.0.1:9000
+      ARTIFACT_REGISTRY_TEST_MIGRATOR_PASSWORD: artifact-registry-migrator-test-only
+      ARTIFACT_REGISTRY_TEST_RUNTIME_PASSWORD: artifact-registry-runtime-test-only
+      ARTIFACT_REGISTRY_TEST_MAINTENANCE_PASSWORD: artifact-registry-maintenance-test-only
+      ARTIFACT_REGISTRY_TEST_READINESS_PASSWORD: artifact-registry-readiness-test-only
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: リリース前の検証
+        run: |
+          docker compose -f docker/compose.yaml up -d --wait
+          go vet ./...
+          go test -race -count=1 -timeout=10m ./...
+      - name: バージョンと commit の決定
+        id: version
+        run: |
+          git fetch --tags origin
+          mkdir -p dist
+          go run ./tools/release > dist/version.json
+          echo "tag=$(jq -r .version dist/version.json)" >> "$GITHUB_OUTPUT"
+          echo "commit=$(jq -r .commit dist/version.json)" >> "$GITHUB_OUTPUT"
+          echo "date=$(jq -r .date dist/version.json)" >> "$GITHUB_OUTPUT"
+      - name: CLI の作成と commit 埋め込み
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+          DATE: ${{ steps.version.outputs.date }}
+        run: |
+          set -euo pipefail
+          package=github.com/rubyu/artifact-registry-go/internal/buildinfo
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            export GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0
+            folder="dist/artifact-registry_${VERSION}_${GOOS}_${GOARCH}"
+            mkdir -p "$folder"
+            suffix=""
+            if [ "$GOOS" = windows ]; then suffix=.exe; fi
+            for command in artifact-registry-migrate artifact-registry-maintenance; do
+              go build -trimpath -ldflags "-s -w -X ${package}.Version=${VERSION} -X ${package}.Commit=${COMMIT} -X ${package}.Date=${DATE}" -o "$folder/$command$suffix" "./cmd/$command"
+            done
+            cp dist/version.json "$folder/version.json"
+            cp README.md "$folder/README.md"
+            if [ "$GOOS" = windows ]; then
+              (cd "$folder" && zip -q -r "../$(basename "$folder").zip" .)
+            else
+              tar -czf "$folder.tar.gz" -C "$folder" .
+            fi
+            rm -r "$folder"
+          done
+          (cd dist && sha256sum *.tar.gz *.zip version.json > checksums.txt)
+          printf 'Commit: `%s`\n\nGo module: `github.com/rubyu/artifact-registry-go@%s`\n\nCLI の `--version` と `version.json` に完全な commit hash を記録しています。\n' "$COMMIT" "$VERSION" > dist/RELEASE.md
+      - name: GitHub Release の公開
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+        run: |
+          set -euo pipefail
+          if ! git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            git tag "$VERSION" "$COMMIT"
+            git push origin "$VERSION"
+          fi
+          test "$(git rev-list -n 1 "$VERSION")" = "$COMMIT"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/*.tar.gz dist/*.zip dist/version.json dist/checksums.txt --clobber
+          else
+            gh release create "$VERSION" dist/*.tar.gz dist/*.zip dist/version.json dist/checksums.txt --verify-tag --title "$VERSION" --notes-file dist/RELEASE.md
+          fi
+      - name: サービスログ
+        if: failure()
+        run: docker compose -f docker/compose.yaml logs
+      - name: 検証環境の終了
+        if: always()
+        run: docker compose -f docker/compose.yaml down -v
