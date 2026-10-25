@@ -93,6 +93,8 @@ func (s *Store) Get(ctx context.Context, path string, start, length int64) ([]by
 	if err := txscope.AssertExternalIOAllowed(ctx); err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, s.config.ReadTimeout)
+	defer cancel()
 	options := minio.GetObjectOptions{}
 	if length >= 0 {
 		if err := options.SetRange(start, start+length-1); err != nil {

@@ -7,8 +7,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/blake2b"
 	"time"
+
+	"golang.org/x/crypto/blake2b"
 )
 
 func LockID(key string) int64 {
@@ -33,7 +34,7 @@ func AcquireLock(ctx context.Context, db *sql.DB, key string, shared bool, timeo
 	defer cancel()
 	conn, err := db.Conn(waitCtx)
 	if err != nil {
-		return nil, err
+		return nil, lockError(waitCtx, err)
 	}
 	id := LockID(key)
 	query := "SELECT pg_try_advisory_lock($1)"
@@ -44,8 +45,9 @@ func AcquireLock(ctx context.Context, db *sql.DB, key string, shared bool, timeo
 		var acquired bool
 		err = conn.QueryRowContext(waitCtx, query, id).Scan(&acquired)
 		if err != nil {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 			conn.Close()
-			return nil, err
+			return nil, lockError(waitCtx, err)
 		}
 		if acquired {
 			return &Lock{conn: conn, id: id, shared: shared}, nil
@@ -84,20 +86,24 @@ func (l *Lock) Release() error {
 	if err != nil || !released {
 		// unlock を確認できない session を pool に戻さない。
 		conn.Raw(func(any) error { return driver.ErrBadConn })
-		return errors.Join(fmt.Errorf("advisory unlock failed: %w", err), conn.Close())
+		return errors.Join(errors.New("advisory unlock failed"), err, conn.Close())
 	}
 	return conn.Close()
 }
 
 // AddShared は同じ connection に migration 競合防止用の lock を追加する。
 func (l *Lock) AddShared(ctx context.Context, key string, timeout time.Duration) error {
+	if l == nil || l.conn == nil || key == "" || timeout <= 0 {
+		return errors.New("active lock, key and positive timeout are required")
+	}
 	wait, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	id := LockID(key)
 	for {
 		var acquired bool
 		if err := l.conn.QueryRowContext(wait, "SELECT pg_try_advisory_lock_shared($1)", id).Scan(&acquired); err != nil {
-			return err
+			_ = l.conn.Raw(func(any) error { return driver.ErrBadConn })
+			return lockError(wait, err)
 		}
 		if acquired {
 			l.extras = append(l.extras, id)
@@ -109,6 +115,13 @@ func (l *Lock) AddShared(ctx context.Context, key string, timeout time.Duration)
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
+}
+
+func lockError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return errors.Join(ErrLockTimeout, ctx.Err(), err)
+	}
+	return err
 }
 
 func EnsureExpected(ctx context.Context, db *sql.DB, schema string, expected int64) error {

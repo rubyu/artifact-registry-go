@@ -75,7 +75,7 @@ func render(text, name string, roles *Roles) string {
 	if roles == nil && (strings.Contains(text, "__OWNER__") || strings.Contains(text, "__MIGRATOR__")) {
 		return ""
 	}
-	runtimeGuard := "IF session_user::text <> current_user::text THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'operation is not permitted for session_user'; END IF;"
+	runtimeGuard := "IF session_user::text <> current_user::text THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'artifact-registry operation is not permitted for session_user'; END IF;"
 	maintenanceGuard, combinedGuard := runtimeGuard, runtimeGuard
 	deleteGuard := "publication.status IN ('aborted', 'discarding')"
 	if roles != nil {
@@ -84,7 +84,7 @@ func render(text, name string, roles *Roles) string {
 			for _, value := range names {
 				parts = append(parts, "pg_has_role(session_user, '"+value+"', 'USAGE')")
 			}
-			return "IF NOT (" + strings.Join(parts, " OR ") + ") THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'operation is not permitted for session_user'; END IF;"
+			return "IF NOT (" + strings.Join(parts, " OR ") + ") THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'artifact-registry operation is not permitted for session_user'; END IF;"
 		}
 		runtimeGuard = check(roles.Runtime)
 		maintenanceGuard = check(roles.Maintenance)

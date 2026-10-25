@@ -164,7 +164,9 @@ func (r *Registry) CommitPreparedMany(ctx context.Context, tx *txscope.Scope, it
 	}
 	for _, p := range items {
 		p := p
-		if err := tx.OnFailed(func(cleanup context.Context) error { return r.AbortPrepared(cleanup, p) }); err != nil {
+		if err := tx.OnFailed(func(cleanup context.Context) error {
+			return txscope.ExternalIOInTx(cleanup, "artifact prepared abort after confirmed rollback", func(ctx context.Context) error { return r.AbortPrepared(ctx, p) })
+		}); err != nil {
 			return nil, err
 		}
 	}

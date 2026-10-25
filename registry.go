@@ -57,9 +57,6 @@ func Attach(db *sql.DB, config Config, opts ...Option) (*Registry, error) {
 		return nil, err
 	}
 	c := config.ObjectStore
-	if c.BasePrefix == "" {
-		c.BasePrefix = "artifact-registry"
-	}
 	store, err := objectstore.New(objectstore.Config{Endpoint: c.Endpoint, AccessKey: c.AccessKey, SecretKey: c.SecretKey, Bucket: c.Bucket, BasePrefix: c.BasePrefix, Secure: c.Secure, ConnectTimeout: c.ConnectTimeout, ReadTimeout: c.ReadTimeout, RetryCount: c.RetryCount, Credentials: c.Credentials})
 	if err != nil {
 		return nil, err
@@ -105,6 +102,9 @@ func (r *Registry) call(ctx context.Context, tx *txscope.Scope, name string, arg
 	return changed, err
 }
 func (r *Registry) guardTx(ctx context.Context, tx *txscope.Scope) error {
+	if tx == nil {
+		return errors.New("transaction scope is required")
+	}
 	if err := tx.RequireOpen(); err != nil {
 		return err
 	}

@@ -133,3 +133,31 @@ func TestCancellationAndPanic(t *testing.T) {
 		t.Fatal(scope.State())
 	}
 }
+
+func TestNestedScopeAndExternalIOPermission(t *testing.T) {
+	var escaped context.Context
+	err := RunBackend(context.Background(), &fakeBackend{}, func(outer *Scope) error {
+		if err := ExternalIOInTx(outer.Context(), "closed side effect", func(ctx context.Context) error { escaped = ctx; return AssertExternalIOAllowed(ctx) }); err != nil {
+			t.Fatal(err)
+		}
+		if !errors.Is(AssertExternalIOAllowed(escaped), ErrExternalIO) {
+			t.Fatal("permission outlived callback")
+		}
+		return RunBackend(outer.Context(), &fakeBackend{}, func(inner *Scope) error {
+			return inner.OnSucceeded(func(ctx context.Context) error {
+				if !errors.Is(AssertExternalIOAllowed(ctx), ErrExternalIO) {
+					t.Fatal("outer scope was hidden")
+				}
+				return nil
+			})
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scope *Scope
+	RunBackend(context.Background(), &fakeBackend{}, func(s *Scope) error { scope = s; return nil })
+	if err := scope.QueryRowContext(context.Background(), "SELECT 1").Scan(new(int)); !errors.Is(err, ErrNotOpen) {
+		t.Fatal(err)
+	}
+}

@@ -35,6 +35,12 @@ func normalizeRef(value string) (string, bool) {
 }
 
 func (r *Registry) LookupCommittedPublication(ctx context.Context, tx *txscope.Scope, ref string) (*CommittedArtifact, error) {
+	if tx == nil {
+		return nil, errors.New("transaction scope is required")
+	}
+	if err := tx.RequireOpen(); err != nil {
+		return nil, err
+	}
 	ref, ok := normalizeRef(ref)
 	if !ok {
 		return nil, nil
@@ -54,6 +60,12 @@ func (r *Registry) LookupCommittedPublication(ctx context.Context, tx *txscope.S
 	return a, nil
 }
 func (r *Registry) LookupPublicationStatuses(ctx context.Context, tx *txscope.Scope, refs []string) (map[string]PublicationStatus, error) {
+	if tx == nil {
+		return nil, errors.New("transaction scope is required")
+	}
+	if err := tx.RequireOpen(); err != nil {
+		return nil, err
+	}
 	result := map[string]PublicationStatus{}
 	normalized := []string{}
 	seen := map[string]bool{}
@@ -126,6 +138,12 @@ func (r *Registry) ReadRangeBytes(ctx context.Context, a *CommittedArtifact, sta
 	return data, nil
 }
 func (r *Registry) RequestDiscardMany(ctx context.Context, tx *txscope.Scope, refs []string) ([]DiscardResult, error) {
+	if tx == nil {
+		return nil, errors.New("transaction scope is required")
+	}
+	if err := tx.RequireOpen(); err != nil {
+		return nil, err
+	}
 	normalized := make([]string, len(refs))
 	for i, ref := range refs {
 		value, ok := normalizeRef(ref)
@@ -203,6 +221,12 @@ func AttachAdvanced(db *sql.DB, config Config, opts ...Option) (*Advanced, error
 }
 func (a *Advanced) Close() error { return a.Public.Close() }
 func (a *Advanced) LookupPublicationDiagnostic(ctx context.Context, tx *txscope.Scope, ref string) (*DiagnosticInfo, error) {
+	if tx == nil {
+		return nil, errors.New("transaction scope is required")
+	}
+	if err := tx.RequireOpen(); err != nil {
+		return nil, err
+	}
 	ref, ok := normalizeRef(ref)
 	if !ok {
 		return nil, nil

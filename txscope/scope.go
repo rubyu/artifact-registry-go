@@ -3,9 +3,11 @@ package txscope
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -37,8 +39,18 @@ type Scope struct {
 	state             State
 	failed, succeeded []Hook
 	ctx               context.Context
+	parent            *Scope
 }
 type contextKey struct{}
+type permissionKey struct{}
+type permission struct {
+	scope  *Scope
+	active atomic.Bool
+}
+type Row interface{ Scan(...any) error }
+type errorRow struct{ err error }
+
+func (r errorRow) Scan(...any) error { return r.err }
 
 func (s *Scope) State() State { s.mu.Lock(); defer s.mu.Unlock(); return s.state }
 func (s *Scope) RequireOpen() error {
@@ -66,7 +78,10 @@ func (s *Scope) QueryContext(ctx context.Context, q string, args ...any) (*sql.R
 	}
 	return s.backend.QueryContext(ctx, q, args...)
 }
-func (s *Scope) QueryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+func (s *Scope) QueryRowContext(ctx context.Context, q string, args ...any) Row {
+	if err := s.RequireOpen(); err != nil {
+		return errorRow{err}
+	}
 	return s.backend.QueryRowContext(ctx, q, args...)
 }
 func (s *Scope) OnFailed(h Hook) error    { return s.add(h, false) }
@@ -89,28 +104,80 @@ func (s *Scope) add(h Hook, success bool) error {
 }
 
 func AssertExternalIOAllowed(ctx context.Context) error {
-	if s, ok := ctx.Value(contextKey{}).(*Scope); ok && s.State() == Open {
-		return ErrExternalIO
+	s, _ := ctx.Value(contextKey{}).(*Scope)
+	if permit, ok := ctx.Value(permissionKey{}).(*permission); ok && permit.scope == s && permit.active.Load() {
+		return nil
+	}
+	for current := s; current != nil; current = current.parent {
+		if current.State() == Open {
+			return ErrExternalIO
+		}
 	}
 	return nil
 }
 
+// ExternalIOInTx は理由を持つ閉じた副作用処理にだけ、有効期間付きの許可を渡す。
+func ExternalIOInTx(ctx context.Context, reason string, fn func(context.Context) error) error {
+	if reason == "" || fn == nil {
+		return errors.New("external I/O requires a reason and callback")
+	}
+	s, _ := ctx.Value(contextKey{}).(*Scope)
+	permit := &permission{scope: s}
+	permit.active.Store(true)
+	defer permit.active.Store(false)
+	return fn(context.WithValue(ctx, permissionKey{}, permit))
+}
+
+type sqlBackend struct {
+	*sql.Tx
+	conn *sql.Conn
+}
+
+func (b *sqlBackend) complete(commit bool) error {
+	var err error
+	if commit {
+		err = b.Tx.Commit()
+	} else {
+		err = b.Tx.Rollback()
+	}
+	if err != nil {
+		_ = b.conn.Raw(func(any) error { return driver.ErrBadConn })
+	}
+	closeErr := b.conn.Close()
+	if errors.Is(closeErr, sql.ErrConnDone) {
+		closeErr = nil
+	}
+	return errors.Join(err, closeErr)
+}
+func (b *sqlBackend) Commit() error   { return b.complete(true) }
+func (b *sqlBackend) Rollback() error { return b.complete(false) }
+
 // Run は transaction の終了を所有する。body は scope.Context を下位処理へ渡す。
 func Run(ctx context.Context, db *sql.DB, fn func(*Scope) error) error {
-	tx, err := db.BeginTx(ctx, nil)
+	poolContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+	conn, err := db.Conn(poolContext)
+	cancel()
 	if err != nil {
 		return err
 	}
-	return RunBackend(ctx, tx, fn)
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		conn.Close()
+		return err
+	}
+	return RunBackend(ctx, &sqlBackend{Tx: tx, conn: conn}, fn)
 }
 
 // RunBackend は接続 adapter と fault injection に同じ状態機械を適用する。
 func RunBackend(ctx context.Context, backend Backend, fn func(*Scope) error) (result error) {
 	s := &Scope{backend: backend, state: Open}
+	s.parent, _ = ctx.Value(contextKey{}).(*Scope)
 	s.ctx = context.WithValue(ctx, contextKey{}, s)
 	defer func() {
 		if value := recover(); value != nil {
-			_ = s.finish(fmt.Errorf("panic: %v", value), false)
+			if s.State() == Open {
+				_ = s.finish(fmt.Errorf("panic: %v", value))
+			}
 			panic(value)
 		}
 	}()
@@ -119,10 +186,10 @@ func RunBackend(ctx context.Context, backend Backend, fn func(*Scope) error) (re
 		bodyErr = ctx.Err()
 	}
 	if bodyErr != nil {
-		return s.finish(bodyErr, false)
+		return s.finish(bodyErr)
 	}
 	if _, err := backend.ExecContext(ctx, "SELECT 1"); err != nil {
-		return s.finish(err, false)
+		return s.finish(err)
 	}
 	if err := backend.Commit(); err != nil {
 		// commit の成否不明時には補償 hook を実行しない。
@@ -133,7 +200,7 @@ func RunBackend(ctx context.Context, backend Backend, fn func(*Scope) error) (re
 	return runHooks(ctx, hooks)
 }
 
-func (s *Scope) finish(primary error, _ bool) error {
+func (s *Scope) finish(primary error) error {
 	rollbackErr := s.backend.Rollback()
 	hooks := s.close(Failed)
 	if rollbackErr != nil {

@@ -15,6 +15,22 @@ func SHA256DigestValue(payload []byte) string {
 	value := sha256.Sum256(payload)
 	return hex.EncodeToString(value[:])
 }
+func SHA256DigestValueCheckConstraint(column string) (string, error) {
+	if err := ValidateIdentifier(column); err != nil {
+		return "", err
+	}
+	return QuoteIdentifier(column) + " ~ '^[0-9a-f]{64}$'", nil
+}
+func AllocateUUID7(ctx context.Context, conn Queryer) (string, error) {
+	values, err := AllocateUUID7Many(ctx, conn, 1)
+	if err != nil {
+		return "", err
+	}
+	if len(values) != 1 {
+		return "", fmt.Errorf("UUID allocation did not return one value")
+	}
+	return values[0], nil
+}
 func ValidateDigestValue(value string) error {
 	if !digestPattern.MatchString(value) {
 		return fmt.Errorf("invalid SHA-256 digest value")

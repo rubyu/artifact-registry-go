@@ -40,6 +40,21 @@ jobs:
         run: go test -race -count=1 -timeout=10m -coverprofile=coverage.out ./...
       - name: CLI のビルド
         run: go build ./cmd/...
+      - name: リリース成果物と埋め込み情報の検証
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          go run ./tools/release > dist/version.json
+          export VERSION=$(jq -r .version dist/version.json)
+          export COMMIT=$(jq -r .commit dist/version.json)
+          export DATE=$(jq -r .date dist/version.json)
+          bash tools/release/package.sh
+          (cd dist && sha256sum -c checksums.txt)
+          mkdir -p "$RUNNER_TEMP/release-check"
+          tar -xzf "dist/artifact-registry_${VERSION}_linux_amd64.tar.gz" -C "$RUNNER_TEMP/release-check"
+          for command in artifact-registry-migrate artifact-registry-maintenance; do
+            "$RUNNER_TEMP/release-check/$command" --version | jq -e --arg version "$VERSION" --arg commit "$COMMIT" --arg date "$DATE" '.version == $version and .commit == $commit and .date == $date'
+          done
       - name: サービスログ
         if: failure()
         run: docker compose -f docker/compose.yaml logs
