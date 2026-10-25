@@ -53,7 +53,7 @@ func (r *Registry) PrepareManyBytes(ctx context.Context, items [][]byte) ([]*Pre
 	if err := txscope.AssertExternalIOAllowed(ctx); err != nil {
 		return nil, &PreparationError{"artifact_upload", err}
 	}
-	now := r.clock.Now().UTC()
+	now := r.now()
 	var uploads []*pendingUpload
 	for attempt := 0; attempt < 3; attempt++ {
 		uploads = nil
@@ -162,10 +162,11 @@ func (r *Registry) CommitPreparedMany(ctx context.Context, tx *txscope.Scope, it
 	if err := r.guardTx(ctx, tx); err != nil {
 		return nil, err
 	}
+	current := r.now()
 	for _, p := range items {
 		p := p
 		if err := tx.OnFailed(func(cleanup context.Context) error {
-			return txscope.ExternalIOInTx(cleanup, "artifact prepared abort after confirmed rollback", func(ctx context.Context) error { return r.AbortPrepared(ctx, p) })
+			return txscope.ExternalIOInTx(cleanup, "artifact prepared abort after confirmed rollback", func(ctx context.Context) error { return r.abortPreparedAt(ctx, p, current) })
 		}); err != nil {
 			return nil, err
 		}
@@ -175,7 +176,7 @@ func (r *Registry) CommitPreparedMany(ctx context.Context, tx *txscope.Scope, it
 	}
 	var result []Artifact
 	for _, p := range items {
-		ok, err := r.call(ctx, tx, "commit_publication", p.info.Ref, p.objectRef, r.clock.Now().UTC())
+		ok, err := r.call(ctx, tx, "commit_publication", p.info.Ref, p.objectRef, current)
 		if err == nil && !ok {
 			err = errors.New("publication commit rejected")
 		}
@@ -192,21 +193,26 @@ func (r *Registry) CommitPreparedMany(ctx context.Context, tx *txscope.Scope, it
 
 func (r *Registry) AbortPreparedMany(ctx context.Context, items []*PreparedArtifact) error {
 	var errs []error
+	current := r.now()
 	for _, p := range items {
-		if err := r.AbortPrepared(ctx, p); err != nil {
+		if err := r.abortPreparedAt(ctx, p, current); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 func (r *Registry) AbortPrepared(ctx context.Context, p *PreparedArtifact) error {
+	return r.abortPreparedAt(ctx, p, r.now())
+}
+
+func (r *Registry) abortPreparedAt(ctx context.Context, p *PreparedArtifact, now time.Time) error {
 	if err := r.prepared(p); err != nil {
 		return err
 	}
 	var aborted bool
 	err := r.mutation(ctx, func(tx *txscope.Scope) error {
 		var err error
-		aborted, err = r.call(tx.Context(), tx, "abort_publication", p.info.Ref, p.objectRef, r.clock.Now().UTC())
+		aborted, err = r.call(tx.Context(), tx, "abort_publication", p.info.Ref, p.objectRef, now)
 		if err != nil {
 			return err
 		}
@@ -227,7 +233,7 @@ func (r *Registry) AbortPrepared(ctx context.Context, p *PreparedArtifact) error
 	if err != nil || !aborted {
 		return err
 	}
-	return r.deleteAndReconcile(ctx, p.objectRef, p.path, "", r.clock.Now().UTC())
+	return r.deleteAndReconcile(ctx, p.objectRef, p.path, "", now)
 }
 func (r *Registry) abortUploads(ctx context.Context, uploads []*pendingUpload, now time.Time) error {
 	if len(uploads) == 0 {

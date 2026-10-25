@@ -89,6 +89,7 @@ func (r *Registry) RunTx(ctx context.Context, fn func(*txscope.Scope) error) err
 	})
 }
 func (r *Registry) table(name string) string { return dbcore.QuoteIdentifier(r.schema) + "." + name }
+func (r *Registry) now() time.Time           { return r.clock.Now().UTC().Truncate(time.Microsecond) }
 func (r *Registry) call(ctx context.Context, tx *txscope.Scope, name string, args ...any) (bool, error) {
 	if err := tx.RequireOpen(); err != nil {
 		return false, err

@@ -156,6 +156,7 @@ func (h *harness) publish(t *testing.T, payload []byte) *PreparedArtifact {
 
 func TestIntegrationPublishReadDiscard(t *testing.T) {
 	h := integrationHarness(t)
+	h.clock.value = h.clock.value.Add(123 * time.Nanosecond)
 	ctx := context.Background()
 	payload := []byte("artifact-registry互換性\x00\xff")
 	p := h.publish(t, payload)
@@ -175,6 +176,9 @@ func TestIntegrationPublishReadDiscard(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, err := h.r.ReadBytes(ctx, artifact)
+	if !artifact.Info().UploadedAt.Equal(p.Info().UploadedAt) {
+		t.Fatal("prepared and stored upload timestamps differ")
+	}
 	if err != nil || !bytes.Equal(data, payload) {
 		t.Fatal(data, err)
 	}

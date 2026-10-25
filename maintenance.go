@@ -90,11 +90,11 @@ func (m *Maintenance) RunCleanupCycle(ctx context.Context) (summary MaintenanceS
 	}
 	summary.LockWaitSeconds = time.Since(started).Seconds()
 	results := []*CleanupResult{&summary.StaleStagedResult, &summary.AbortedResult, &summary.DiscardingResult, &summary.DeleteFailedResult}
-	for i, phase := range m.phases(r.clock.Now().UTC()) {
+	for i := range results {
 		if err = cycle.Err(); err != nil {
 			return summary, err
 		}
-		*results[i], err = m.cleanup(cycle, phase)
+		*results[i], err = m.cleanup(cycle, m.phases(r.now())[i])
 		if err != nil {
 			return summary, err
 		}
@@ -120,6 +120,7 @@ func (m *Maintenance) join() string {
 }
 func (m *Maintenance) cleanup(ctx context.Context, phase cleanupPhase) (result CleanupResult, err error) {
 	r := m.registry
+	now := r.now()
 	args := append([]any{}, phase.args...)
 	args = append(args, m.settings.MaxBatchSize)
 	candidates := []cleanupCandidate{}
@@ -145,7 +146,6 @@ func (m *Maintenance) cleanup(ctx context.Context, phase cleanupPhase) (result C
 		if err = ctx.Err(); err != nil {
 			return result, err
 		}
-		now := r.clock.Now().UTC()
 		if candidate.publicationStatus == Staged {
 			var changed bool
 			err = r.mutation(ctx, func(tx *txscope.Scope) error {
@@ -230,7 +230,7 @@ func (m *Maintenance) backlog(ctx context.Context) (CleanupBacklog, error) {
 	backlog := CleanupBacklog{}
 	metrics := []*QueueMetrics{&backlog.StaleStaged, &backlog.Aborted, &backlog.Discarding, &backlog.DeleteFailed}
 	columns := []string{"p.created_at", "p.aborted_at", "p.discard_requested_at", "o.updated_at"}
-	now := m.registry.clock.Now().UTC()
+	now := m.registry.now()
 	err := m.registry.mutation(ctx, func(tx *txscope.Scope) error {
 		for i, phase := range m.phases(now) {
 			var oldest sql.NullTime

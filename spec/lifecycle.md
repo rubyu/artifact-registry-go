@@ -10,6 +10,7 @@
 - 通常 reader は `committed` と `available` の組だけを返します。
 - bytes の内容 schema と業務データの意味は利用側が所有します。
 - lifecycle timestamp は注入した `Clock` が決定します。
+- timestamp は PostgreSQL と Python と同じ UTC / microsecond 精度に揃え、batch commit / abort は同じ timestamp を使用します。
 - ref は opaque な UUID です。通常 API は object path / object ref を公開しません。
 - digest は prefix を持たない lowercase SHA-256 hex 64 桁です。
 

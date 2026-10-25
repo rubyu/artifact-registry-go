@@ -169,7 +169,7 @@ func (r *Registry) RequestDiscardMany(ctx context.Context, tx *txscope.Scope, re
 	}
 	sort.Strings(unique)
 	byRef := map[string]DiscardResult{}
-	now := r.clock.Now().UTC()
+	now := r.now()
 	for _, ref := range unique {
 		changed, err := r.call(ctx, tx, "request_discard", ref, now)
 		if err != nil {
