@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,15 +39,67 @@ func (v version) less(other version) bool {
 	}
 	return v.patch < other.patch
 }
-func nextVersion(tags []string) string {
+
+type increment int
+
+const (
+	patchRelease increment = iota
+	minorRelease
+	majorRelease
+)
+
+func nextVersion(tags []string, bump increment) string {
 	latest := version{}
+	found := false
 	for _, tag := range tags {
 		v, ok := parse(tag)
-		if ok && latest.less(v) {
+		if ok && (!found || latest.less(v)) {
 			latest = v
+			found = true
 		}
 	}
-	return fmt.Sprintf("v%d.%d.0", latest.major, latest.minor+1)
+	if !found {
+		return "v0.1.0"
+	}
+	switch bump {
+	case majorRelease:
+		return fmt.Sprintf("v%d.0.0", latest.major+1)
+	case minorRelease:
+		return fmt.Sprintf("v%d.%d.0", latest.major, latest.minor+1)
+	default:
+		return fmt.Sprintf("v%d.%d.%d", latest.major, latest.minor, latest.patch+1)
+	}
+}
+
+type pullRequest struct {
+	MergeCommitSHA string  `json:"merge_commit_sha"`
+	MergedAt       *string `json:"merged_at"`
+	Base           struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+}
+
+// Only the merged PR that produced this main commit controls its release.
+// PRs merged into develop, and open PRs sharing a commit, must not affect it.
+func incrementForCommit(pulls []pullRequest, commit string) increment {
+	bump := patchRelease
+	for _, pr := range pulls {
+		if pr.Base.Ref != "main" || pr.MergedAt == nil || pr.MergeCommitSHA != commit {
+			continue
+		}
+		for _, label := range pr.Labels {
+			switch label.Name {
+			case "release:major":
+				return majorRelease
+			case "release:minor":
+				bump = minorRelease
+			}
+		}
+	}
+	return bump
 }
 func git(args ...string) (string, error) {
 	out, err := exec.Command("git", args...).Output()
@@ -73,7 +126,7 @@ func existingVersion(tags []string) (string, bool) {
 	return found, found != ""
 }
 
-func releasePlan() (plan, error) {
+func releasePlan(pulls []pullRequest) (plan, error) {
 	commit, err := git("rev-parse", "HEAD")
 	if err != nil {
 		return plan{}, err
@@ -93,10 +146,23 @@ func releasePlan() (plan, error) {
 	if err != nil {
 		return plan{}, err
 	}
-	return plan{nextVersion(strings.Fields(all)), commit, date, false}, nil
+	return plan{nextVersion(strings.Fields(all), incrementForCommit(pulls, commit)), commit, date, false}, nil
 }
 func main() {
-	plan, err := releasePlan()
+	pullsPath := flag.String("pull-requests", "", "GitHub commit-associated pull requests JSON file")
+	flag.Parse()
+	var pulls []pullRequest
+	if *pullsPath != "" {
+		data, err := os.ReadFile(*pullsPath)
+		if err == nil {
+			err = json.Unmarshal(data, &pulls)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	plan, err := releasePlan(pulls)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
