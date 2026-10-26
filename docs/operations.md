@@ -43,6 +43,10 @@ object storage は次の値を使います。
 - `ARTIFACT_REGISTRY_S3_READ_TIMEOUT_SECONDS`: 既定 `10`。
 - `ARTIFACT_REGISTRY_S3_RETRY_COUNT`: 既定 `2`。非負整数。
 
+Go 版の GET / DELETE は `READ_TIMEOUT_SECONDS` を operation 全体の上限にも使用します。
+location の取得、retry、応答本文の読み取りを含み、呼び出し元にそれより短い期限があればその期限を優先します。
+DELETE の timeout は削除失敗として扱い、通常の `delete_failed` と maintenance retry に進みます。
+
 cleanup の設定は次のとおりです。いずれも正の値を必須とします。
 
 | 環境変数 | 既定値 |

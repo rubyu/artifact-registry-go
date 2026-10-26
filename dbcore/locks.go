@@ -125,11 +125,19 @@ func lockError(ctx context.Context, err error) error {
 }
 
 func EnsureExpected(ctx context.Context, db *sql.DB, schema string, expected int64) error {
+	return ensureExpected(ctx, db, schema, expected)
+}
+
+type revisionQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func ensureExpected(ctx context.Context, conn revisionQueryer, schema string, expected int64) error {
 	if err := ValidateSchemaName(schema); err != nil {
 		return err
 	}
 	var version int64
-	err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(version_id),0) FROM "+QuoteIdentifier(schema)+".schema_migrations WHERE is_applied").Scan(&version)
+	err := conn.QueryRowContext(ctx, "SELECT COALESCE(MAX(version_id),0) FROM "+QuoteIdentifier(schema)+".schema_migrations WHERE is_applied").Scan(&version)
 	if err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
@@ -139,14 +147,16 @@ func EnsureExpected(ctx context.Context, db *sql.DB, schema string, expected int
 	return nil
 }
 
-func WithSchemaReady(ctx context.Context, db *sql.DB, schema, key string, version int64, timeout time.Duration, fn func(context.Context) error) (err error) {
+// WithSchemaReady は lock、revision 確認、callback に同じ connection を使う。
+// callback は渡された connection を使用し、閉じたり callback 外へ持ち出したりしない。
+func WithSchemaReady(ctx context.Context, db *sql.DB, schema, key string, version int64, timeout time.Duration, fn func(context.Context, *sql.Conn) error) (err error) {
 	lock, err := AcquireLock(ctx, db, key, true, timeout)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, lock.Release()) }()
-	if err = EnsureExpected(ctx, db, schema, version); err != nil {
+	if err = ensureExpected(ctx, lock.conn, schema, version); err != nil {
 		return err
 	}
-	return fn(ctx)
+	return fn(ctx, lock.conn)
 }

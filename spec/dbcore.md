@@ -14,6 +14,10 @@ schema の既定 key は `artifact-registry/<schema>`、cleanup key は `artifac
 session lock は専用 connection で保持し、解放を確認できない connection は pool に戻しません。
 lock の取得・解放は有界とし、元エラーと解放エラーの両方を返します。
 
+`WithSchemaReady` は lock を保持する connection で revision を確認し、同じ `*sql.Conn` を callback に渡します。
+最大 1 接続の pool でも動作します。callback 内の DB 操作は渡された connection を使用し、
+同じ pool から別接続を要求しません。connection の close と lock の解放は helper が所有します。
+
 role-aware target は owner、migrator、runtime、maintenance、readiness の五 role を必須とし、重複を拒否します。
 identifier は lowercase ASCII の先頭文字または `_` で始まり、以降は lowercase ASCII / 数字 / `_` とします。
 63 byte を超える identifier を拒否し、SQL の identifier を引用します。

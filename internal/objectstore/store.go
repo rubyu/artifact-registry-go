@@ -112,5 +112,7 @@ func (s *Store) Delete(ctx context.Context, path string) error {
 	if err := txscope.AssertExternalIOAllowed(ctx); err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(ctx, s.config.ReadTimeout)
+	defer cancel()
 	return s.client.RemoveObject(ctx, s.config.Bucket, path, minio.RemoveObjectOptions{})
 }
