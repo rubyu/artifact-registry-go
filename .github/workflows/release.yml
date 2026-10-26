@@ -6,13 +6,34 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
   group: publish-release
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      ready: ${{ steps.project.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Go 本体の取り込みを確認
+        id: project
+        run: |
+          if test -f go.mod; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Go 本体がまだ main にないため、リリースをスキップします。" >> "$GITHUB_STEP_SUMMARY"
+          fi
   release:
+    needs: prepare
+    if: needs.prepare.outputs.ready == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -39,9 +60,12 @@ jobs:
       - name: バージョンと commit の決定
         id: version
         run: |
+          set -euo pipefail
           git fetch --tags origin
           mkdir -p dist
-          go run ./tools/release > dist/version.json
+          gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls?per_page=100" \
+            | jq -s 'add' > dist/pull-requests.json
+          go run ./tools/release -pull-requests dist/pull-requests.json > dist/version.json
           echo "tag=$(jq -r .version dist/version.json)" >> "$GITHUB_OUTPUT"
           echo "commit=$(jq -r .commit dist/version.json)" >> "$GITHUB_OUTPUT"
           echo "date=$(jq -r .date dist/version.json)" >> "$GITHUB_OUTPUT"

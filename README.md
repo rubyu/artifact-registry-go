@@ -65,10 +65,12 @@ Alembic 管理 DB の自動採用は行いません。[互換性と移行範囲]
 
 ## リリース
 
-`main` の更新で最大の安定 version タグから minor を一つ増やし、patch を `0` に戻します。
+`main` の更新で最大の安定 version タグから通常は patch を一つ増やします。
+main 向け PR に `release:minor` / `release:major` ラベルを付けると、その種別を優先します。
 最初のタグは `v0.1.0` です。ソースに version 更新 commit を追加せず、対象 commit にタグを付けます。
 Linux / macOS / Windows 向け CLI と SHA-256 checksum、`version.json` を GitHub Release に公開します。
 各 CLI の `--version` には version、完全な commit hash、対象 commit の日時を埋め込みます。
 同じ commit の再実行は同じタグを使用します。Go ライブラリはそのタグで取得できます。
+ラベル指定と初回導入の詳細は [リリース手順](docs/releases.md) を参照してください。
 
 移植元は [docs/upstream.md](docs/upstream.md) を参照してください。
