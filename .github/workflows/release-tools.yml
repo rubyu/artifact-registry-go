@@ -1,0 +1,36 @@
+name: Release tools
+
+on:
+  push:
+    paths:
+      - '.github/workflows/release*.yml'
+      - 'tools/release/**'
+  pull_request:
+    paths:
+      - '.github/workflows/release*.yml'
+      - 'tools/release/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-tools-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache: false
+      # File mode also works before the Go module is merged into main.
+      - name: バージョン判定と再実行の検証
+        working-directory: tools/release
+        run: |
+          test -z "$(gofmt -l main.go main_test.go)"
+          go vet main.go main_test.go
+          go test -race -count=1 -timeout=5m main.go main_test.go
