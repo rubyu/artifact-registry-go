@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ARTIFACT_REGISTRY_TEST_POSTGRES_DSN: postgresql://postgres:postgres@127.0.0.1:5432/artifact_registry?sslmode=disable
+      ARTIFACT_REGISTRY_TEST_S3_ENDPOINT: 127.0.0.1:9000
+      ARTIFACT_REGISTRY_TEST_MIGRATOR_PASSWORD: artifact-registry-migrator-test-only
+      ARTIFACT_REGISTRY_TEST_RUNTIME_PASSWORD: artifact-registry-runtime-test-only
+      ARTIFACT_REGISTRY_TEST_MAINTENANCE_PASSWORD: artifact-registry-maintenance-test-only
+      ARTIFACT_REGISTRY_TEST_READINESS_PASSWORD: artifact-registry-readiness-test-only
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: リリース前の検証
+        run: |
+          docker compose -f docker/compose.yaml up -d --wait
+          go vet ./...
+          go test -race -count=1 -timeout=10m ./...
+      - name: バージョンと commit の決定
+        id: version
+        run: |
+          git fetch --tags origin
+          mkdir -p dist
+          go run ./tools/release > dist/version.json
+          echo "tag=$(jq -r .version dist/version.json)" >> "$GITHUB_OUTPUT"
+          echo "commit=$(jq -r .commit dist/version.json)" >> "$GITHUB_OUTPUT"
+          echo "date=$(jq -r .date dist/version.json)" >> "$GITHUB_OUTPUT"
+      - name: CLI の作成と commit 埋め込み
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+          DATE: ${{ steps.version.outputs.date }}
+        run: |
+          bash tools/release/package.sh
+      - name: GitHub Release の公開
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+        run: |
+          set -euo pipefail
+          if ! git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            git tag "$VERSION" "$COMMIT"
+            git push origin "$VERSION"
+          fi
+          test "$(git rev-list -n 1 "$VERSION")" = "$COMMIT"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/*.tar.gz dist/*.zip dist/version.json dist/checksums.txt --clobber
+          else
+            gh release create "$VERSION" dist/*.tar.gz dist/*.zip dist/version.json dist/checksums.txt --verify-tag --title "$VERSION" --notes-file dist/RELEASE.md
+          fi
+      - name: サービスログ
+        if: failure()
+        run: docker compose -f docker/compose.yaml logs
+      - name: 検証環境の終了
+        if: always()
+        run: docker compose -f docker/compose.yaml down -v
